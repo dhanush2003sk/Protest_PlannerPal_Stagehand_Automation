@@ -1,0 +1,11 @@
+{
+  "click on the User profile icon labelled Dhanush S K and click Document settings": "I am an adviser who can access document-settings",
+  "click on the Edit button for a meeting note": "Click the \"Edit\" button for the meeting note",
+  "click on Add subheadings": "Click the \"Add subheadings\" button",
+  "enter a name of the subheading": "Enter \"Quarterly Review\" into the subheading name field",
+  "click the Generate Instructions button": "Click the \"Generate Instructions\" button",
+  "wait for the Instructions to load": "Wait for the instructions to load",
+  "click Save changes": "Click the \"Save changes\" button",
+  "new subheading appears at the bottom of the list": "Verify that \"Quarterly Review\" is visible at the bottom of the list",
+  "edit and delete buttons appear to the right of the name": "Verify that \"Edit\" and \"Delete\" buttons are visible next to \"Quarterly Review\""
+}

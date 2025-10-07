@@ -1,0 +1,24 @@
+{
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "failed": 1
+  },
+  "generatedAt": "2025-10-01T08:15:55.172Z",
+  "results": [
+    {
+      "issueId": "8f55e12a-5e2a-4101-aaee-9bcf23d1bdb1",
+      "issueTitle": "Successful Login",
+      "scenarioTitle": "I click on \"Sign In\" button",
+      "error": "stagehand.observe is not a function",
+      "browserbaseSessionId": null,
+      "videoPath": "C:\\Users\\user\\Documents\\Stagehand\\PlannerPal\\reports\\videos\\95052e926d1cbe67eabbfad650277bce.webm",
+      "tracePath": "C:\\Users\\user\\Documents\\Stagehand\\PlannerPal\\reports\\traces\\8f55e12a-5e2a-4101-aaee-9bcf23d1bdb1-i-click-on-sign-in-button.zip",
+      "screenshotPath": "C:\\Users\\user\\Documents\\Stagehand\\PlannerPal\\reports\\screenshots\\8f55e12a-5e2a-4101-aaee-9bcf23d1bdb1-i-click-on-sign-in-button.png",
+      "startTime": "2025-10-01T08:15:52.632Z",
+      "status": "failed",
+      "endTime": "2025-10-01T08:15:54.885Z",
+      "durationMs": 2253
+    }
+  ]
+}

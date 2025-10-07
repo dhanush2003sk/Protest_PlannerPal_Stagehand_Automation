@@ -1,0 +1,12 @@
+{
+  "name": "plannerpal-tests",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@browserbasehq/stagehand": "^2.5.0",
+    "@linear/sdk": "^60.0.0",
+    "otplib": "^12.0.1",
+    "playwright": "^1.46.0",
+    "slug": "^11.0.0"
+  }
+}
