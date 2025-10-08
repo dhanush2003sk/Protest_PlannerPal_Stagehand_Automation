@@ -206,12 +206,16 @@ async function runSteps(stagehand, issue) {
     const issues = await getAllIssues(projectId);
 
     if (issues.length === 0) {
+      // Nothing to run; set a clear run-level status and end gracefully
       console.warn("⚠️ No issues with label 'stagehand_script' found.");
-      await browser.close();
-      return;
+      await stagehand.setMetadata({ status: "skipped", reason: "no_issues" });
+      return; // teardown handled in finally
     }
 
     console.log(`📄 Found ${issues.length} issue(s) to execute.`);
+
+    // Track whether any scenario failed to reflect an accurate run status
+    let hadFailures = false;
 
     for (const issue of issues) {
       console.log("\n------------------------------------------");
@@ -219,11 +223,22 @@ async function runSteps(stagehand, issue) {
         await runSteps(stagehand, issue);
       } catch (err) {
         console.error(`🚨 Scenario "${issue.identifier}" failed:`, err.message);
+        hadFailures = true; // remember any failure for final status
         continue; // proceed to next issue
       }
     }
 
-    console.log("\n✅ All scenarios processed.");
+    // Emit a final run-level status and set a non-zero exit code if needed
+    await stagehand.setMetadata({
+      status: hadFailures ? "failed" : "passed",
+      totalScenarios: issues.length,
+    });
+    if (hadFailures) {
+      process.exitCode = 1; // non-zero exit without aborting finally
+      console.error("\n🚨 One or more scenarios failed.");
+    } else {
+      console.log("\n✅ All scenarios passed.");
+    }
   } catch (err) {
     console.error("\n🚨 Script terminated due to error:");
     console.error(err.message);
@@ -233,6 +248,8 @@ async function runSteps(stagehand, issue) {
     });
     process.exit(1);
   } finally {
+    // Always close Stagehand first to flush metadata, then close the browser
+    await stagehand.close();
     await browser.close();
   }
 })();
