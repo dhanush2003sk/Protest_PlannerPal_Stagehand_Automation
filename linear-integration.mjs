@@ -5,6 +5,30 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 dotenv.config();
 
+// Helper to report run status to Browserbase via Stagehand logs.
+// Stagehand v2.5.0 has no stagehand.setMetadata API; instead, Browserbase
+// surfaces structured log lines in the session UI and via the Logs API.
+// This function standardizes our logging format for pass/fail/skip/error.
+async function reportStatus(stagehand, payload) {
+  // payload example: { status: "failed", scenario, failedStep, errorMessage }
+  try {
+    stagehand.log({
+      category: "run",
+      message: `Scenario status: ${payload.status}`,
+      level: payload.status === "passed" ? 1 : 0,
+      auxiliary: Object.fromEntries(
+        Object.entries(payload).map(([key, value]) => ([
+          key,
+          { value: String(value), type: typeof value === "number" ? "float" : typeof value === "boolean" ? "boolean" : "string" }
+        ]))
+      )
+    });
+  } catch (err) {
+    // Best-effort logging; do not throw if logging fails
+    console.warn("reportStatus log failed:", err?.message || err);
+  }
+}
+
 const {
   OPENAI_API_KEY,
   LINEAR_API_KEY,
@@ -124,7 +148,8 @@ async function runSteps(stagehand, issue) {
 
   if (steps.length === 0) {
     console.warn(`⚠️ No valid steps found in issue "${issue.identifier}"`);
-    await stagehand.setMetadata({
+    // Replaced setMetadata with reportStatus to emit a visible log in Browserbase
+    await reportStatus(stagehand, {
       status: "skipped",
       reason: "No valid steps found",
       scenario: issue.identifier
@@ -168,7 +193,8 @@ async function runSteps(stagehand, issue) {
         path: `screenshots/FAILED-${issue.identifier}-step-${i + 1}.png`
       });
 
-      await stagehand.setMetadata({
+      // Replaced setMetadata with reportStatus to mark scenario failure in logs
+      await reportStatus(stagehand, {
         status: "failed",
         scenario: issue.identifier,
         failedStep: text,
@@ -179,7 +205,8 @@ async function runSteps(stagehand, issue) {
     }
   }
 
-  await stagehand.setMetadata({
+  // Replaced setMetadata with reportStatus to indicate scenario success
+  await reportStatus(stagehand, {
     status: "passed",
     scenario: issue.identifier,
     totalSteps: steps.length
@@ -208,7 +235,8 @@ async function runSteps(stagehand, issue) {
     if (issues.length === 0) {
       // Nothing to run; set a clear run-level status and end gracefully
       console.warn("⚠️ No issues with label 'stagehand_script' found.");
-      await stagehand.setMetadata({ status: "skipped", reason: "no_issues" });
+    // Replaced setMetadata with reportStatus for run-level skip
+    await reportStatus(stagehand, { status: "skipped", reason: "no_issues" });
       return; // teardown handled in finally
     }
 
@@ -229,7 +257,8 @@ async function runSteps(stagehand, issue) {
     }
 
     // Emit a final run-level status and set a non-zero exit code if needed
-    await stagehand.setMetadata({
+    // Replaced setMetadata with reportStatus to summarize run outcome
+    await reportStatus(stagehand, {
       status: hadFailures ? "failed" : "passed",
       totalScenarios: issues.length,
     });
@@ -242,7 +271,8 @@ async function runSteps(stagehand, issue) {
   } catch (err) {
     console.error("\n🚨 Script terminated due to error:");
     console.error(err.message);
-    await stagehand.setMetadata({
+    // Replaced setMetadata with reportStatus to record unexpected script error
+    await reportStatus(stagehand, {
       status: "error",
       reason: err.message
     });
