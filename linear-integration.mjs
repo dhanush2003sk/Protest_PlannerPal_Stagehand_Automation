@@ -67,11 +67,10 @@ async function getProjectId(projectName) {
 }
 
 // ---------------------- 📥 Fetch Issues ----------------------
-async function getAllIssues(projectId) {
+async function getAllIssues() {
   const query = `
     query {
       issues(filter: {
-        project: { id: { eq: "${projectId}" } },
         labels: { name: { eq: "stagehand_script" } }
       }) {
         nodes {
@@ -228,9 +227,8 @@ async function runSteps(stagehand, issue) {
   try {
     await login(stagehand);
 
-    console.log("📥 Fetching Linear project and issues...");
-    const projectId = await getProjectId(LINEAR_PROJECT_NAME);
-    const issues = await getAllIssues(projectId);
+    console.log("📥 Fetching Linear issues with label 'stagehand_script'...");
+    const issues = await getAllIssues();
 
     if (issues.length === 0) {
       // Nothing to run; set a clear run-level status and end gracefully
