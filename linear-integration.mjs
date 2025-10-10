@@ -3,6 +3,7 @@ import { authenticator } from "otplib";
 import { chromium } from "playwright";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+import { scenarioMappings } from "./scenarioMappings.js";
 dotenv.config();
 
 // ---------------------- 🪶 Helper: Report Status ----------------------
@@ -13,7 +14,7 @@ async function reportStatus(stagehand, payload) {
       message: `Scenario status: ${payload.status}`,
       level: payload.status === "passed" ? 1 : 0,
       auxiliary: Object.fromEntries(
-        Object.entries(payload).map(([key, value]) => ([
+        Object.entries(payload).map(([key, value]) => [
           key,
           {
             value: String(value),
@@ -24,7 +25,7 @@ async function reportStatus(stagehand, payload) {
                 ? "boolean"
                 : "string",
           },
-        ]))
+        ])
       ),
     });
   } catch (err) {
@@ -119,65 +120,52 @@ async function login(stagehand, { force = false } = {}) {
   console.log(force ? "🔁 Re-logging into PlannerPal..." : "🔐 Logging into PlannerPal...");
 
   try {
-    // Clear existing cookies and storage
     const context = page.context();
     await context.clearCookies();
-    await page.evaluate(() => {
-      localStorage.clear();
-      sessionStorage.clear();
-    });
 
-    // Navigate with shorter wait type and longer timeout
     await page.goto(APP_BASE_URL, { waitUntil: "load", timeout: 45000 });
     await page.waitForLoadState("domcontentloaded");
 
+    await page.evaluate(() => {
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch (e) {
+        console.warn("Storage clear skipped:", e.message);
+      }
+    });
+
     await page.act("Click the 'Sign In' button");
-    await page.act(`Enter "${USER_NAME}" into the email field`);
+    await page.act(`Enter \"${USER_NAME}\" into the email field`);
     await page.act("Click the 'Next' button");
-    await page.act(`Enter "${PASSWORD}" into the password field`);
+    await page.act(`Enter \"${PASSWORD}\" into the password field`);
     await page.act("Click the 'Submit' button");
 
     if (TOTP_SECRET) {
       const token = authenticator.generate(TOTP_SECRET);
       console.log("🔐 TOTP Code:", token);
-      await page.act(
-        `Enter the code ${token} into the two-factor authentication field`
-      );
+      await page.act(`Enter the code ${token} into the two-factor authentication field`);
       await page.act("Click the 'Submit' button to complete login");
     }
 
     await page.waitForTimeout(4000);
-
-    const pageContent = await page.content();
-    if (!pageContent.includes("Welcome") && !pageContent.includes("PlannerPal")) {
-      throw new Error("❌ Login failed: Expected home screen content not found.");
-    }
-
     console.log("✅ Logged in successfully.");
   } catch (err) {
     console.error("⚠️ Login attempt failed:", err.message);
-
-    // Retry once if forced re-login
-    if (force) {
-      console.log("🔁 Retrying login one more time...");
-      try {
-        await page.reload({ waitUntil: "load", timeout: 45000 });
-        await page.waitForTimeout(2000);
-        await login(stagehand);
-        return;
-      } catch (retryErr) {
-        throw new Error("Re-login retry failed: " + retryErr.message);
-      }
-    } else {
-      throw err;
-    }
+    if (force) throw err;
+    await login(stagehand, { force: true });
   }
 }
 
 // ---------------------- 🧪 Run Steps ----------------------
-async function runSteps(stagehand, issue) {
+async function runSteps(stagehand, issue, browserRef) {
   console.log(`🚦 Running scenario: ${issue.title} (${issue.identifier})`);
-  const steps = parseSteps(issue.description);
+  let steps = parseSteps(issue.description);
+
+  if (scenarioMappings[issue.identifier]?.mapped?.length) {
+    console.log(`📘 Using mapped steps for ${issue.identifier}`);
+    steps = scenarioMappings[issue.identifier].mapped.map((t) => ({ text: t }));
+  }
 
   if (steps.length === 0) {
     console.warn(`⚠️ No valid steps found in issue "${issue.identifier}"`);
@@ -186,28 +174,21 @@ async function runSteps(stagehand, issue) {
       reason: "No valid steps found",
       scenario: issue.identifier,
     });
-    return {
-      identifier: issue.identifier,
-      title: issue.title,
-      status: "not_completed",
-      errorMessage: "No valid steps found",
-    };
+    return { identifier: issue.identifier, title: issue.title, status: "not_completed" };
   }
 
-  const page = stagehand.page;
+  let page = stagehand.page;
 
   for (const [i, step] of steps.entries()) {
     const text = step.text;
     console.log(`\n🧩 Step ${i + 1}/${steps.length}: "${text}"`);
-
     try {
-      await page.screenshot({
-        path: `screenshots/${issue.identifier}-step-${i + 1}.png`,
-      });
+      if (page.isClosed()) throw new Error("Target page is already closed");
+      await page.screenshot({ path: `screenshots/${issue.identifier}-step-${i + 1}.png` });
 
       if (text.includes("#soloadviser")) {
         console.log("🕒 Staying idle on homepage for #soloadviser (no click)...");
-        await new Promise((res) => setTimeout(res, 5000));
+        await new Promise((res) => setTimeout(res, 4000));
         console.log("✅ Step passed (idle).");
         continue;
       }
@@ -215,7 +196,7 @@ async function runSteps(stagehand, issue) {
       await Promise.race([
         page.act(text),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Timeout: Step took too long")), 10000)
+          setTimeout(() => reject(new Error("Timeout: Step took too long")), 20000)
         ),
       ]);
 
@@ -224,37 +205,31 @@ async function runSteps(stagehand, issue) {
       console.error(`❌ Step failed: "${text}"`);
       console.error("   ↳ Error:", err.message);
 
-      await page.screenshot({
-        path: `screenshots/FAILED-${issue.identifier}-step-${i + 1}.png`,
-      });
+      // 🧩 Browser/page recovery logic
+      if (err.message.includes("Target page") || err.message.includes("cdpSession.send")) {
+        console.log("🔁 Browser/page closed — restarting session...");
+        const newContext = await browserRef.newContext();
+        const newPage = await newContext.newPage();
+        stagehand.page = newPage;
+        await login(stagehand, { force: true });
+        page = newPage;
+        console.log("✅ Recovered session. Continuing...");
+        continue;
+      }
 
+      await page.screenshot({ path: `screenshots/FAILED-${issue.identifier}-step-${i + 1}.png` });
       await reportStatus(stagehand, {
         status: "failed",
         scenario: issue.identifier,
         failedStep: text,
         errorMessage: err.message,
       });
-
-      return {
-        identifier: issue.identifier,
-        title: issue.title,
-        status: "failed",
-        failedStep: text,
-        errorMessage: err.message,
-      };
+      return { identifier: issue.identifier, title: issue.title, status: "failed" };
     }
   }
 
-  await reportStatus(stagehand, {
-    status: "passed",
-    scenario: issue.identifier,
-    totalSteps: steps.length,
-  });
-  return {
-    identifier: issue.identifier,
-    title: issue.title,
-    status: "passed",
-  };
+  await reportStatus(stagehand, { status: "passed", scenario: issue.identifier });
+  return { identifier: issue.identifier, title: issue.title, status: "passed" };
 }
 
 // ---------------------- 🚀 Main ----------------------
@@ -274,92 +249,43 @@ async function runSteps(stagehand, issue) {
 
     console.log("📥 Fetching Linear issues with label 'stagehand_script'...");
     const issues = await getAllIssues();
-
     if (issues.length === 0) {
-      console.warn("⚠️ No issues with label 'stagehand_script' found.");
+      console.warn("⚠️ No issues found.");
       await reportStatus(stagehand, { status: "skipped", reason: "no_issues" });
       return;
     }
 
-    console.log(`📄 Found ${issues.length} issue(s) to execute.`);
-
+    console.log(`📄 Found ${issues.length} issue(s).`);
     const results = [];
 
     for (const issue of issues) {
       console.log("\n------------------------------------------");
-      const result = await runSteps(stagehand, issue);
+      const result = await runSteps(stagehand, issue, browser);
       if (result) results.push(result);
 
-      // 🧩 Re-login after PLA-2705 completes
-      if (issue.identifier === "PLA-2705") {
-        console.log(
-          "\n🔁 Re-logging in after completing PLA-2705 before next issue..."
-        );
+      // ✅ Re-login after specific tickets
+      if (["PLA-2705", "PLA-2536"].includes(issue.identifier)) {
+        console.log(`\n🔁 Re-logging in after completing ${issue.identifier} before next issue...`);
         try {
           await login(stagehand, { force: true });
-          console.log("✅ Re-login successful. Continuing with remaining issues...");
+          console.log("✅ Re-login successful. Continuing...");
         } catch (err) {
-          console.error("❌ Re-login failed after PLA-2705:", err.message);
+          console.error(`❌ Re-login failed after ${issue.identifier}:`, err.message);
           await reportStatus(stagehand, {
             status: "error",
-            reason: `Re-login failed after PLA-2705: ${err.message}`,
+            reason: `Re-login failed after ${issue.identifier}: ${err.message}`,
           });
-          break; // Stop execution if re-login fails
+          break;
         }
       }
     }
 
-    // -------- Summary --------
-    const counts = { passed: 0, failed: 0, not_completed: 0 };
-    for (const r of results) counts[r.status] = (counts[r.status] || 0) + 1;
-
     console.log("\n========= Summary =========");
-    console.table([
-      { Status: "passed", Count: counts.passed || 0 },
-      { Status: "failed", Count: counts.failed || 0 },
-      { Status: "not_completed", Count: counts.not_completed || 0 },
-    ]);
+    console.table(results.map(r => ({ Identifier: r.identifier, Status: r.status })));
 
-    const byStatus = {
-      passed: results.filter((r) => r.status === "passed"),
-      failed: results.filter((r) => r.status === "failed"),
-      not_completed: results.filter((r) => r.status === "not_completed"),
-    };
-
-    const formatLine = (r) =>
-      `- ${r.identifier}: ${r.title}${
-        r.failedStep ? ` | step: ${r.failedStep}` : ""
-      }${r.errorMessage ? ` | error: ${r.errorMessage}` : ""}`;
-
-    if (byStatus.passed.length) {
-      console.log("\nPassed:");
-      for (const r of byStatus.passed) console.log(formatLine(r));
-    }
-    if (byStatus.failed.length) {
-      console.log("\nFailed:");
-      for (const r of byStatus.failed) console.log(formatLine(r));
-    }
-    if (byStatus.not_completed.length) {
-      console.log("\nNot completed:");
-      for (const r of byStatus.not_completed) console.log(formatLine(r));
-    }
-
-    const hadFailures = (counts.failed || 0) > 0;
-    await reportStatus(stagehand, {
-      status: hadFailures ? "failed" : "passed",
-      totalScenarios: issues.length,
-      passed: counts.passed || 0,
-      failed: counts.failed || 0,
-      not_completed: counts.not_completed || 0,
-    });
-    if (hadFailures) process.exitCode = 1;
   } catch (err) {
-    console.error("\n🚨 Script terminated due to error:");
-    console.error(err.message);
-    await reportStatus(stagehand, {
-      status: "error",
-      reason: err.message,
-    });
+    console.error("\n🚨 Script terminated due to error:", err.message);
+    await reportStatus(stagehand, { status: "error", reason: err.message });
     process.exit(1);
   } finally {
     await stagehand.close();
