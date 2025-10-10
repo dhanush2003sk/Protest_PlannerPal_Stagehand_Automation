@@ -10,12 +10,12 @@ export const scenarioMappings = {
     ],
     mapped: [
       "Given I am an #soloadviser with access to the CRM Updater",
-      "Click the 'Profile icon' on top right corner",
-      "Click the 'CRM Updater' option",
-      "Click the first client name in the 'Clients with updates pending' table",
-      "Check that the Edit button next to Include in update has a pencil icon",
-      "Click the 'Close' button labeled 'X'",
-      "Click the 'PlannerPal' logo"
+      "When Click the 'Profile icon' on top right corner",
+      "And Click the 'CRM Updater' option",
+      "And Click the first client name in the 'Clients with updates pending' table",
+      "And Check that the Edit button next to Include in update has a pencil icon",
+      "And Click the 'Close' button labeled 'X'",
+      "Then Click the 'PlannerPal' logo"
     ]
   },
 
@@ -33,7 +33,8 @@ export const scenarioMappings = {
       "And type 'Test' under First name",
       "And type 'Account' under Surname",
       "And click 'Add client' button",
-      "Then check the Join call via button is visible - so I can use the recall.ai bot to join a teams or zoom call"
+      "Then check the Join call via button is visible - so I can use the recall.ai bot to join a teams or zoom call",
+      "Then click on PlannerPal logo"
     ]
   },
 
@@ -106,11 +107,42 @@ export const scenarioMappings = {
     title:"Don't show 'Sign In' on the global nav when I am entering my password",
     mapped:[
       "Given I am a  #soloadviser",
-      "And I click on profile icon on top right corner and click on logout button",
+      "And I click on profile icon on top right corner",
+      "And click on logout button",
       "And I click on SignIn button",
       "And type the Username 'dhanush.kantharaj@protestcorp.com', and click on Signin button",
       "Then check in the password page, Signin on top right corner should not be there",
       "Then click on PlannerPal logo"
+    ]
+  },
+
+  "PLA-2515":{
+    title:"Iress CRM Ids not showing on client that has been imported from Iress",
+    mapped:[
+      "Given I am #soloadviser OR #employedadviser OR #superuser that has synced with Iress Xplan",
+      "And type 'sep24' in search box under Client list",
+      "And Click the first matching client entry for 'sep24' in the search results",
+      "Then I see a 'Iress entity id' underneath the name of the client group, together with one or more identifiers"
+    ]
+  },
+
+  "PLA-2485":{
+    title:"Save the CRM Updater Suggestions I have selected",
+    mapped:[
+      "Given I am a #soloadviser OR #employedadviser OR #superuser with access to the CRM Updater",
+      "When Click the 'Profile icon' on top right corner",
+      "And Click the 'CRM Updater' option",
+      "And Click the first client name in the 'Clients with updates pending' table",
+      "And click on 'Include in update' button",
+      "And click on 'X' close button",
+      "And again click on first client name in the 'Clients with updates pending' table",
+      "Then the suggestions I selected previously are remembered (ie I don't have to start from scratch again)",
+      "Given I am an #soloadviser OR #employedadviser OR #superuser  with access to the CRM Updater",
+      "When Click the 'Profile icon' on top right corner",
+      "And Click the 'CRM Updater' option",
+      "And Click the first client name in the 'Clients with updates pending' table",
+      "And click on 'Include in update' button",
+      "And click on 'Make 1 updates to Iress' button"
     ]
   }
 
