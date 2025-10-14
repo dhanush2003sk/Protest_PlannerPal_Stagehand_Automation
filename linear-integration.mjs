@@ -6,51 +6,66 @@ import dotenv from "dotenv";
 import { scenarioMappings } from "./scenarioMappings.js";
 dotenv.config();
 
-// ---------------------- 🪶 Helper: Report Status ----------------------
-async function reportStatus(stagehand, payload) {
-  try {
-    stagehand.log({
-      category: "run",
-      message: `Scenario status: ${payload.status}`,
-      level: payload.status === "passed" ? 1 : 0,
-      auxiliary: Object.fromEntries(
-        Object.entries(payload).map(([key, value]) => [
-          key,
-          {
-            value: String(value),
-            type:
-              typeof value === "number"
-                ? "float"
-                : typeof value === "boolean"
-                ? "boolean"
-                : "string",
-          },
-        ])
-      ),
-    });
-  } catch (err) {
-    console.warn("reportStatus log failed:", err?.message || err);
-  }
-}
-
 const {
   OPENAI_API_KEY,
   LINEAR_API_KEY,
-  LINEAR_PROJECT_NAME,
   APP_BASE_URL,
   USER_NAME,
   PASSWORD,
   TOTP_SECRET,
 } = process.env;
 
-// ---------------------- 🔍 Fetch Project ----------------------
-async function getProjectId(projectName) {
+// ---------------------- 🔐 Login ----------------------
+async function login(stagehand, { force = false } = {}) {
+  const page = stagehand.page;
+  console.log(force ? "🔁 Re-logging..." : "🔐 Logging in...");
+
+  try {
+    const context = page.context();
+    await context.clearCookies();
+
+    await page.goto(APP_BASE_URL, { waitUntil: "load", timeout: 45000 });
+    await page.waitForLoadState("domcontentloaded");
+
+    await page.evaluate(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+    });
+
+    await page.act("Click the 'Sign In' button");
+    await page.act(`Enter \"${USER_NAME}\" into the email field`);
+    await page.act("Click the 'Next' button");
+    await page.act(`Enter \"${PASSWORD}\" into the password field`);
+    await page.act("Click the 'Submit' button");
+
+    if (TOTP_SECRET) {
+      const token = authenticator.generate(TOTP_SECRET);
+      console.log("🔐 TOTP Code:", token);
+      await page.act(`Enter the code ${token} into the two-factor authentication field`);
+      await page.act("Click the 'Submit' button to complete login");
+    }
+
+    await page.waitForTimeout(4000);
+    console.log("✅ Logged in successfully.");
+  } catch (err) {
+    console.error("⚠️ Login failed:", err.message);
+    if (force) throw err;
+    await login(stagehand, { force: true });
+  }
+}
+
+// ---------------------- 📥 Fetch Issues ----------------------
+async function getLabeledIssues() {
   const query = `
     query {
-      projects {
+      issues(filter: {
+        labels: { name: { eq: "stagehand_script" } }
+      }) {
         nodes {
           id
-          name
+          identifier
+          title
+          description
         }
       }
     }
@@ -65,19 +80,14 @@ async function getProjectId(projectName) {
   });
 
   const data = await res.json();
-  const project = data?.data?.projects?.nodes?.find(
-    (p) => p.name === projectName
-  );
-  if (!project) throw new Error(`❌ Project "${projectName}" not found.`);
-  return project.id;
+  return data?.data?.issues?.nodes || [];
 }
 
-// ---------------------- 📥 Fetch Issues ----------------------
-async function getAllIssues() {
+async function getProjectIssues(projectName) {
   const query = `
     query {
       issues(filter: {
-        labels: { name: { eq: "stagehand_script" } }
+        project: { name: { eq: "${projectName}" } }
       }) {
         nodes {
           id
@@ -114,46 +124,30 @@ function parseSteps(description) {
     });
 }
 
-// ---------------------- 🔐 Login ----------------------
-async function login(stagehand, { force = false } = {}) {
-  const page = stagehand.page;
-  console.log(force ? "🔁 Re-logging into PlannerPal..." : "🔐 Logging into PlannerPal...");
-
+// ---------------------- 🪶 Report Status ----------------------
+async function reportStatus(stagehand, payload) {
   try {
-    const context = page.context();
-    await context.clearCookies();
-
-    await page.goto(APP_BASE_URL, { waitUntil: "load", timeout: 45000 });
-    await page.waitForLoadState("domcontentloaded");
-
-    await page.evaluate(() => {
-      try {
-        localStorage.clear();
-        sessionStorage.clear();
-      } catch (e) {
-        console.warn("Storage clear skipped:", e.message);
-      }
+    stagehand.log({
+      category: "run",
+      message: `Scenario status: ${payload.status}`,
+      level: payload.status === "passed" ? 1 : 0,
+      auxiliary: Object.fromEntries(
+        Object.entries(payload).map(([key, value]) => [
+          key,
+          {
+            value: String(value),
+            type:
+              typeof value === "number"
+                ? "float"
+                : typeof value === "boolean"
+                ? "boolean"
+                : "string",
+          },
+        ])
+      ),
     });
-
-    await page.act("Click the 'Sign In' button");
-    await page.act(`Enter \"${USER_NAME}\" into the email field`);
-    await page.act("Click the 'Next' button");
-    await page.act(`Enter \"${PASSWORD}\" into the password field`);
-    await page.act("Click the 'Submit' button");
-
-    if (TOTP_SECRET) {
-      const token = authenticator.generate(TOTP_SECRET);
-      console.log("🔐 TOTP Code:", token);
-      await page.act(`Enter the code ${token} into the two-factor authentication field`);
-      await page.act("Click the 'Submit' button to complete login");
-    }
-
-    await page.waitForTimeout(4000);
-    console.log("✅ Logged in successfully.");
   } catch (err) {
-    console.error("⚠️ Login attempt failed:", err.message);
-    if (force) throw err;
-    await login(stagehand, { force: true });
+    console.warn("reportStatus log failed:", err?.message || err);
   }
 }
 
@@ -205,12 +199,11 @@ async function runSteps(stagehand, issue, browserRef) {
       console.error(`❌ Step failed: "${text}"`);
       console.error("   ↳ Error:", err.message);
 
-      // 🧩 Browser/page recovery logic
       if (err.message.includes("Target page") || err.message.includes("cdpSession.send")) {
         console.log("🔁 Browser/page closed — restarting session...");
         const newContext = await browserRef.newContext();
         const newPage = await newContext.newPage();
-        stagehand.page = newPage;
+        await stagehand.init({ context: newContext, page: newPage });
         await login(stagehand, { force: true });
         page = newPage;
         console.log("✅ Recovered session. Continuing...");
@@ -232,45 +225,39 @@ async function runSteps(stagehand, issue, browserRef) {
   return { identifier: issue.identifier, title: issue.title, status: "passed" };
 }
 
-// ---------------------- 🚀 Main ----------------------
-(async () => {
+// ---------------------- 🧵 Run Session Chunk ----------------------
+async function runSessionChunk(issues, sessionId) {
+  console.log(`🧵 [${sessionId}] Starting session with ${issues.length} issues`);
+
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
+  const page = await context.newPage();
 
   const stagehand = new Stagehand({
     env: "BROWSERBASE",
     modelName: "gpt-4o",
     modelClientOptions: { apiKey: OPENAI_API_KEY },
   });
-  await stagehand.init({ context });
 
-  try {
-    await login(stagehand);
+  await stagehand.init({ context, page });
+  await login(stagehand);
 
-    console.log("📥 Fetching Linear issues with label 'stagehand_script'...");
-    const issues = await getAllIssues();
-    if (issues.length === 0) {
-      console.warn("⚠️ No issues found.");
-      await reportStatus(stagehand, { status: "skipped", reason: "no_issues" });
-      return;
-    }
+  const results = [];
 
-    console.log(`📄 Found ${issues.length} issue(s).`);
-    const results = [];
-
-    for (const issue of issues) {
-      console.log("\n------------------------------------------");
+  for (const issue of issues) {
+    try {
+      console.log(`🧪 [${sessionId}] Running ${issue.identifier}`);
       const result = await runSteps(stagehand, issue, browser);
-      if (result) results.push(result);
+      results.push(result);
 
-      // ✅ Re-login after specific tickets
+      // 🔁 Re-login after specific tickets
       if (["PLA-2705", "PLA-2536"].includes(issue.identifier)) {
-        console.log(`\n🔁 Re-logging in after completing ${issue.identifier} before next issue...`);
+        console.log(`\n🔁 [${sessionId}] Re-logging after ${issue.identifier}...`);
         try {
           await login(stagehand, { force: true });
-          console.log("✅ Re-login successful. Continuing...");
+          console.log(`[${sessionId}] Re-login successful.`);
         } catch (err) {
-          console.error(`❌ Re-login failed after ${issue.identifier}:`, err.message);
+          console.error(`[${sessionId}] Re-login failed:`, err.message);
           await reportStatus(stagehand, {
             status: "error",
             reason: `Re-login failed after ${issue.identifier}: ${err.message}`,
@@ -278,17 +265,45 @@ async function runSteps(stagehand, issue, browserRef) {
           break;
         }
       }
+
+    } catch (err) {
+      console.error(`[${sessionId}] Error running ${issue.identifier}:`, err.message);
     }
-
-    console.log("\n========= Summary =========");
-    console.table(results.map(r => ({ Identifier: r.identifier, Status: r.status })));
-
-  } catch (err) {
-    console.error("\n🚨 Script terminated due to error:", err.message);
-    await reportStatus(stagehand, { status: "error", reason: err.message });
-    process.exit(1);
-  } finally {
-    await stagehand.close();
-    await browser.close();
   }
+
+  await stagehand.close();
+  await browser.close();
+
+  return results;
+}
+// ---------------------- 🚀 Main ----------------------
+(async () => {
+  const labeledIssues = await getLabeledIssues();
+  const projectIssues = await getProjectIssues("Regression Pack");
+
+  if (labeledIssues.length === 0 && projectIssues.length === 0) {
+    console.warn("⚠️ No issues found.");
+    return;
+  }
+
+  // 🟢 Start first session immediately
+  const session1 = runSessionChunk(labeledIssues, "session-labeled");
+
+  // ⏳ Start second session after 20 seconds
+  const session2 = new Promise(resolve => {
+    setTimeout(() => {
+      resolve(runSessionChunk(projectIssues, "session-project"));
+    }, 30000);
+  });
+
+  // 🧵 Run both sessions in parallel
+  const results = await Promise.all([session1, session2]);
+
+  // 📊 Print summary
+  console.log("\n========= Summary =========");
+  console.table(results.flat().map(r => ({
+    Identifier: r.identifier,
+    Title: r.title,
+    Status: r.status
+  })));
 })();

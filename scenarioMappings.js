@@ -144,6 +144,31 @@ export const scenarioMappings = {
       "And click on 'Include in update' button",
       "And click on 'Make 1 updates to Iress' button"
     ]
+  },
+
+  "PLA-2463":{
+    title:"List of documents generated from a transcript",
+    mapped:[
+      "Given I am a #soloadviser who has generated one or more documents from a transcript",
+      "And type 'Doctor Test Reg Group' in search box under Client list",
+      "And Click the first matching client entry for 'Doctor Test Reg Group' in the search results",
+      "And Click on Audio recordings button",
+      "And select the first audio under Audio recordings"
+    ]
+  },
+
+  "PLA-2762":{
+    title:"User able to Generate the Document as Meeting Note",
+    mapped:[
+      "Given I am a #soloadviser who has generated one or more documents from a transcript",
+      "When type 'Doctor Test Reg Group' in search box under Client list",
+      "And Click the first matching client entry for 'Doctor Test Reg Group' in the search results",
+      "And click on upload recording button",
+      "And click on 'Browse files'",
+      "And upload the audio from PlannerPal folder",
+      "Then select Voice note"
+    ]
+    //requiresIsolatedSession: true
   }
 
   // Add more scenarios here
