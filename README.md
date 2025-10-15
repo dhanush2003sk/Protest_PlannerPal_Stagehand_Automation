@@ -33,3 +33,8 @@ We have custom .cursorrules for this project. It'll help quite a bit with writin
 ### Run on Local
 
 To run on a local browser, add your API keys to .env and change `env: "LOCAL"` to `env: "BROWSERBASE"` in [stagehand.config.ts](stagehand.config.ts).
+
+### Particular Issue
+To run the particular issue, add the ticket number to 'TARGET_ISSUE_ID' in '.env' file (Ex: TARGET_ISSUE_ID=PLA-2609)
+Then run the target-issue.mjs file. (command to run: node target-issue.mjs)
+
