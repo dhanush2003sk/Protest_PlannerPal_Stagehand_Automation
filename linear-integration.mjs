@@ -2,6 +2,7 @@ import { Stagehand } from "@browserbasehq/stagehand";
 import { authenticator } from "otplib";
 import { chromium } from "playwright";
 import fetch from "node-fetch";
+import fs from "fs";
 import dotenv from "dotenv";
 import { scenarioMappings } from "./scenarioMappings.js";
 dotenv.config();
@@ -14,6 +15,9 @@ const {
   PASSWORD,
   TOTP_SECRET,
 } = process.env;
+
+// ---------------------- 🎧 Audio URL ----------------------
+const AUDIO_URL = "https://raw.githubusercontent.com/dhanush2003sk/Protest_PlannerPal_Stagehand_Automation/main/audio.mp3";
 
 // ---------------------- 🔐 Login ----------------------
 async function login(stagehand, { force = false } = {}) {
@@ -33,9 +37,9 @@ async function login(stagehand, { force = false } = {}) {
     });
 
     await page.act("Click the 'Sign In' button");
-    await page.act(`Enter \"${USER_NAME}\" into the email field`);
+    await page.act(`Enter "${USER_NAME}" into the email field`);
     await page.act("Click the 'Next' button");
-    await page.act(`Enter \"${PASSWORD}\" into the password field`);
+    await page.act(`Enter "${PASSWORD}" into the password field`);
     await page.act("Click the 'Submit' button");
 
     if (TOTP_SECRET) {
@@ -151,6 +155,44 @@ async function reportStatus(stagehand, payload) {
   }
 }
 
+// ---------------------- 🎧 Upload Audio Helper ----------------------
+async function uploadAudio(stagehand) {
+  const page = stagehand.page;
+  console.log("🎧 Starting audio upload...");
+
+  try {
+    // Fetch audio from URL
+    const res = await fetch(AUDIO_URL);
+    if (!res.ok) throw new Error(`Failed to fetch audio. Status: ${res.status}`);
+
+    const buffer = await res.arrayBuffer();
+    const localPath = "./audio.mp3";
+    fs.writeFileSync(localPath, Buffer.from(buffer));
+    console.log("⬇️ Audio file saved locally");
+
+    // Wait for the file input to appear
+    await page.waitForSelector('button[class*="px-4"]', { timeout: 15000 });
+    const uploadInput = await page.$('input[type="file"]');
+    if (!uploadInput) throw new Error("File input element not found for upload");
+
+    await uploadInput.setInputFiles(localPath);
+    console.log("📤 Audio file uploaded");
+    await page.waitForTimeout(20000);
+
+    await page.waitForTimeout(2000);
+  } catch (err) {
+    console.error("⚠️ uploadAudio error:", err.message);
+    throw err; // Fail the step if audio upload fails
+  }
+  await page.waitForSelector('button:text("View Transcript")', { timeout: 15000 });
+ 
+// Once it appears, you can click it
+await page.click('button:text("View Transcript")');
+console.log("✅ 'View Transcript' button clicked");
+}
+
+
+
 // ---------------------- 🧪 Run Steps ----------------------
 async function runSteps(stagehand, issue, browserRef) {
   console.log(`🚦 Running scenario: ${issue.title} (${issue.identifier})`);
@@ -180,8 +222,15 @@ async function runSteps(stagehand, issue, browserRef) {
       if (page.isClosed()) throw new Error("Target page is already closed");
       await page.screenshot({ path: `screenshots/${issue.identifier}-step-${i + 1}.png` });
 
+      // Hook: upload audio
+      if (text.toLowerCase().includes("upload audio") || text.toLowerCase().includes("attach recording")) {
+        await uploadAudio(stagehand);
+        console.log("✅ Step passed (audio upload)");
+        continue;
+      }
+
       if (text.includes("#soloadviser")) {
-        console.log("🕒 Staying idle on homepage for #soloadviser (no click)...");
+        console.log("🕒 Staying idle on homepage for #soloadviser...");
         await new Promise((res) => setTimeout(res, 4000));
         console.log("✅ Step passed (idle).");
         continue;
@@ -250,7 +299,7 @@ async function runSessionChunk(issues, sessionId) {
       const result = await runSteps(stagehand, issue, browser);
       results.push(result);
 
-      // 🔁 Re-login after specific tickets
+      // Re-login after certain tickets
       if (["PLA-2705", "PLA-2536"].includes(issue.identifier)) {
         console.log(`\n🔁 [${sessionId}] Re-logging after ${issue.identifier}...`);
         try {
@@ -265,7 +314,6 @@ async function runSessionChunk(issues, sessionId) {
           break;
         }
       }
-
     } catch (err) {
       console.error(`[${sessionId}] Error running ${issue.identifier}:`, err.message);
     }
@@ -276,6 +324,7 @@ async function runSessionChunk(issues, sessionId) {
 
   return results;
 }
+
 // ---------------------- 🚀 Main ----------------------
 (async () => {
   const labeledIssues = await getLabeledIssues();
@@ -286,24 +335,22 @@ async function runSessionChunk(issues, sessionId) {
     return;
   }
 
-  // 🟢 Start first session immediately
   const session1 = runSessionChunk(labeledIssues, "session-labeled");
 
-  // ⏳ Start second session after 20 seconds
-  const session2 = new Promise(resolve => {
+  const session2 = new Promise((resolve) => {
     setTimeout(() => {
       resolve(runSessionChunk(projectIssues, "session-project"));
     }, 30000);
   });
 
-  // 🧵 Run both sessions in parallel
   const results = await Promise.all([session1, session2]);
 
-  // 📊 Print summary
   console.log("\n========= Summary =========");
-  console.table(results.flat().map(r => ({
-    Identifier: r.identifier,
-    Title: r.title,
-    Status: r.status
-  })));
+  console.table(
+    results.flat().map((r) => ({
+      Identifier: r.identifier,
+      Title: r.title,
+      Status: r.status,
+    }))
+  );
 })();

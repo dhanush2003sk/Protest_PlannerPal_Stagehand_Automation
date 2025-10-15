@@ -165,8 +165,10 @@ export const scenarioMappings = {
       "And Click the first matching client entry for 'Doctor Test Reg Group' in the search results",
       "And click on upload recording button",
       "And click on 'Browse files'",
-      "And upload the audio from PlannerPal folder",
-      "Then select Voice note"
+      "Then upload audio",
+      "And click on Transcribe recording button",
+      "Then select Voice note",
+      "Then click on 'View transcript' button"
     ]
     //requiresIsolatedSession: true
   }
