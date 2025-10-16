@@ -4,7 +4,6 @@ import { chromium } from "playwright";
 import fetch from "node-fetch";
 import fs from "fs";
 import dotenv from "dotenv";
-import { scenarioMappings } from "./scenarioMappings.js";
 dotenv.config();
 
 const {
@@ -17,7 +16,8 @@ const {
 } = process.env;
 
 // ---------------------- 🎧 Audio URL ----------------------
-const AUDIO_URL = "https://raw.githubusercontent.com/dhanush2003sk/Protest_PlannerPal_Stagehand_Automation/main/audio.mp3";
+const AUDIO_URL =
+  "https://raw.githubusercontent.com/dhanush2003sk/Protest_PlannerPal_Stagehand_Automation/main/audio.mp3";
 
 // ---------------------- 🔐 Login ----------------------
 async function login(stagehand, { force = false } = {}) {
@@ -45,7 +45,9 @@ async function login(stagehand, { force = false } = {}) {
     if (TOTP_SECRET) {
       const token = authenticator.generate(TOTP_SECRET);
       console.log("🔐 TOTP Code:", token);
-      await page.act(`Enter the code ${token} into the two-factor authentication field`);
+      await page.act(
+        `Enter the code ${token} into the two-factor authentication field`
+      );
       await page.act("Click the 'Submit' button to complete login");
     }
 
@@ -117,15 +119,38 @@ async function getProjectIssues(projectName) {
 
 // ---------------------- 🧠 Parse Gherkin Steps ----------------------
 function parseSteps(description) {
+  console.log("🔍 Parsing issue description...");
+
   const bulletRegex = /^(\s*[-•·*]\s*)(Given|When|Then|And)\s/i;
-  return description
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => bulletRegex.test(line))
-    .map((line) => {
-      const cleaned = line.replace(bulletRegex, "").trim();
-      return { text: cleaned };
-    });
+  const lines = description.split("\n");
+
+  const steps = [];
+  let collecting = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Start collecting when we hit a Stagehand-tagged block
+    if (/^Acceptance Criteria\s*\(#Stagehand\)/i.test(trimmed)) {
+      collecting = true;
+      continue;
+    }
+
+    // Stop collecting if we hit another Acceptance Criteria block
+    if (/^Acceptance Criteria(?!\s*\(#Stagehand\))/i.test(trimmed)) {
+      collecting = false;
+      continue;
+    }
+
+    // If we're inside a Stagehand block, extract valid steps
+    if (collecting && bulletRegex.test(trimmed)) {
+      const cleaned = trimmed.replace(bulletRegex, "").trim();
+      steps.push({ text: cleaned });
+    }
+  }
+
+  console.log(`🧩 Extracted ${steps.length} step(s).`);
+  return steps;
 }
 
 // ---------------------- 🪶 Report Status ----------------------
@@ -161,7 +186,7 @@ async function uploadAudio(stagehand) {
   console.log("🎧 Starting audio upload...");
 
   try {
-    // Fetch audio from URL
+    // Download and save the audio file locally
     const res = await fetch(AUDIO_URL);
     if (!res.ok) throw new Error(`Failed to fetch audio. Status: ${res.status}`);
 
@@ -170,38 +195,54 @@ async function uploadAudio(stagehand) {
     fs.writeFileSync(localPath, Buffer.from(buffer));
     console.log("⬇️ Audio file saved locally");
 
-    // Wait for the file input to appear
-    await page.waitForSelector('button[class*="px-4"]', { timeout: 15000 });
-    const uploadInput = await page.$('input[type="file"]');
-    if (!uploadInput) throw new Error("File input element not found for upload");
+    // Wait for any file input (even if hidden)
+    let uploadInput = await page.$('input[type="file"]');
 
+    if (!uploadInput) {
+      throw new Error("File input not found on page.");
+    }
+
+    // Check if input is hidden, try to make it visible if needed
+    const isHidden = await uploadInput.evaluate((el) => {
+      const style = window.getComputedStyle(el);
+      return style.display === "none" || style.visibility === "hidden";
+    });
+
+    if (isHidden) {
+      console.log("👀 File input is hidden — trying to reveal it...");
+      await page.evaluate(() => {
+        const el = document.querySelector('input[type="file"]');
+        if (el) el.style.display = "block";
+      });
+    }
+
+    // If still not visible, try clicking “Browse files” to trigger it
+    if (isHidden) {
+      const browseButton = await page.$("text=Browse files");
+      if (browseButton) {
+        console.log("🖱️ Clicking 'Browse files' to activate input...");
+        await browseButton.click();
+        await page.waitForTimeout(1000);
+      }
+    }
+
+    // Finally set the file
+    uploadInput = await page.$('input[type="file"]');
     await uploadInput.setInputFiles(localPath);
-    console.log("📤 Audio file uploaded");
-    await page.waitForTimeout(20000);
-
-    await page.waitForTimeout(2000);
+    console.log("📤 Audio file uploaded successfully.");
   } catch (err) {
-    console.error("⚠️ uploadAudio error:", err.message);
-    throw err; // Fail the step if audio upload fails
+    console.error("❌ uploadAudio error:", err.message);
+    await page.screenshot({ path: "FAILED_uploadAudio.png", fullPage: true });
+    throw err;
   }
-  await page.waitForSelector('button:text("View Transcript")', { timeout: 15000 });
- 
-// Once it appears, you can click it
-await page.click('button:text("View Transcript")');
-console.log("✅ 'View Transcript' button clicked");
 }
 
 
-
-// ---------------------- 🧪 Run Steps ----------------------
+// ---------------------- 🧪 Run Steps (Modified Flow) ----------------------
 async function runSteps(stagehand, issue, browserRef) {
   console.log(`🚦 Running scenario: ${issue.title} (${issue.identifier})`);
-  let steps = parseSteps(issue.description);
 
-  if (scenarioMappings[issue.identifier]?.mapped?.length) {
-    console.log(`📘 Using mapped steps for ${issue.identifier}`);
-    steps = scenarioMappings[issue.identifier].mapped.map((t) => ({ text: t }));
-  }
+  let steps = parseSteps(issue.description);
 
   if (steps.length === 0) {
     console.warn(`⚠️ No valid steps found in issue "${issue.identifier}"`);
@@ -210,25 +251,87 @@ async function runSteps(stagehand, issue, browserRef) {
       reason: "No valid steps found",
       scenario: issue.identifier,
     });
-    return { identifier: issue.identifier, title: issue.title, status: "not_completed" };
+    return {
+      identifier: issue.identifier,
+      title: issue.title,
+      status: "not_completed",
+    };
   }
 
   let page = stagehand.page;
 
-  for (const [i, step] of steps.entries()) {
-    const text = step.text;
+  for (let i = 0; i < steps.length; i++) {
+    const text = steps[i].text;
     console.log(`\n🧩 Step ${i + 1}/${steps.length}: "${text}"`);
+
     try {
       if (page.isClosed()) throw new Error("Target page is already closed");
-      await page.screenshot({ path: `screenshots/${issue.identifier}-step-${i + 1}.png` });
+      await page.screenshot({
+        path: `screenshots/${issue.identifier}-step-${i + 1}.png`,
+      });
 
-      // Hook: upload audio
-      if (text.toLowerCase().includes("upload audio") || text.toLowerCase().includes("attach recording")) {
+      // 🟩 Handle "upload audio" step
+      if (
+        text.toLowerCase().includes("upload audio") ||
+        text.toLowerCase().includes("attach recording")
+      ) {
+        console.log("🎧 Detected audio upload step — starting upload sequence...");
         await uploadAudio(stagehand);
-        console.log("✅ Step passed (audio upload)");
+        console.log("✅ Audio upload completed");
+
+        // 🟨 Fetch next 2 steps (transcribe + voice note)
+        for (let j = 1; j <= 2; j++) {
+          if (steps[i + j]) {
+            const nextStep = steps[i + j].text;
+            console.log(`➡️ Running post-upload step: "${nextStep}"`);
+            await page.act(nextStep);
+            console.log(`✅ Completed: "${nextStep}"`);
+          }
+        }
+
+        // 🕒 Wait for transcript to generate
+        console.log("⏳ Waiting for transcript generation...");
+        const maxWait = 4 * 60 * 1000;
+        const checkInterval = 5000;
+        let transcriptReady = false;
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < maxWait) {
+          const content = await page.content();
+          if (
+            content.includes("TRANSCRIPT GENERATED") ||
+            content.includes("View transcript")
+          ) {
+            transcriptReady = true;
+            break;
+          }
+          console.log("🕒 Transcript not ready yet, waiting 5s...");
+          await page.waitForTimeout(checkInterval);
+        }
+
+        if (!transcriptReady)
+          throw new Error("Timeout waiting for transcript generation");
+
+        // ✅ Click "View transcript"
+        const viewBtn = await page.waitForSelector("text=View transcript", {
+          timeout: 30000,
+          state: "visible",
+        });
+        if (viewBtn) {
+          await viewBtn.click();
+          console.log("📄 Clicked 'View transcript' button after generation completed");
+        } else {
+          console.warn(
+            "⚠️ 'View transcript' button not found even after transcript ready"
+          );
+        }
+
+        // Skip next two steps since already handled
+        i += 2;
         continue;
       }
 
+      // 🟦 Idle or special step
       if (text.includes("#soloadviser")) {
         console.log("🕒 Staying idle on homepage for #soloadviser...");
         await new Promise((res) => setTimeout(res, 4000));
@@ -236,6 +339,7 @@ async function runSteps(stagehand, issue, browserRef) {
         continue;
       }
 
+      // 🔹 Normal Stagehand action
       await Promise.race([
         page.act(text),
         new Promise((_, reject) =>
@@ -259,7 +363,9 @@ async function runSteps(stagehand, issue, browserRef) {
         continue;
       }
 
-      await page.screenshot({ path: `screenshots/FAILED-${issue.identifier}-step-${i + 1}.png` });
+      await page.screenshot({
+        path: `screenshots/FAILED-${issue.identifier}-step-${i + 1}.png`,
+      });
       await reportStatus(stagehand, {
         status: "failed",
         scenario: issue.identifier,
@@ -278,7 +384,11 @@ async function runSteps(stagehand, issue, browserRef) {
 async function runSessionChunk(issues, sessionId) {
   console.log(`🧵 [${sessionId}] Starting session with ${issues.length} issues`);
 
-  const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--disable-gpu", "--no-sandbox"],
+  });
+
   const context = await browser.newContext();
   const page = await context.newPage();
 
@@ -299,7 +409,6 @@ async function runSessionChunk(issues, sessionId) {
       const result = await runSteps(stagehand, issue, browser);
       results.push(result);
 
-      // Re-login after certain tickets
       if (["PLA-2705", "PLA-2536"].includes(issue.identifier)) {
         console.log(`\n🔁 [${sessionId}] Re-logging after ${issue.identifier}...`);
         try {
@@ -320,8 +429,15 @@ async function runSessionChunk(issues, sessionId) {
   }
 
   await stagehand.close();
-  await browser.close();
 
+  try {
+    await stagehand.shutdown();
+    console.log(`🛑 Browserbase session (${sessionId}) terminated.`);
+  } catch (err) {
+    console.warn(`⚠️ Could not shut down session (${sessionId}):`, err.message);
+  }
+
+  await browser.close();
   return results;
 }
 
