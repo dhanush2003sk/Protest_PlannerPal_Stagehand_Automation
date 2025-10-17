@@ -237,7 +237,6 @@ async function uploadAudio(stagehand) {
   }
 }
 
-
 // ---------------------- 🧪 Run Steps (Modified Flow) ----------------------
 async function runSteps(stagehand, issue, browserRef) {
   console.log(`🚦 Running scenario: ${issue.title} (${issue.identifier})`);
@@ -266,11 +265,12 @@ async function runSteps(stagehand, issue, browserRef) {
 
     try {
       if (page.isClosed()) throw new Error("Target page is already closed");
+
       await page.screenshot({
         path: `screenshots/${issue.identifier}-step-${i + 1}.png`,
       });
 
-      // 🟩 Handle "upload audio" step
+      // 🎧 Audio Upload Flow
       if (
         text.toLowerCase().includes("upload audio") ||
         text.toLowerCase().includes("attach recording")
@@ -279,7 +279,7 @@ async function runSteps(stagehand, issue, browserRef) {
         await uploadAudio(stagehand);
         console.log("✅ Audio upload completed");
 
-        // 🟨 Fetch next 2 steps (transcribe + voice note)
+        // 🟨 Execute next 2 steps (transcribe + voice note)
         for (let j = 1; j <= 2; j++) {
           if (steps[i + j]) {
             const nextStep = steps[i + j].text;
@@ -289,45 +289,44 @@ async function runSteps(stagehand, issue, browserRef) {
           }
         }
 
-        // 🕒 Wait for transcript to generate
-        console.log("⏳ Waiting for transcript generation...");
-        const maxWait = 4 * 60 * 1000;
-        const checkInterval = 5000;
-        let transcriptReady = false;
-        const startTime = Date.now();
-
-        while (Date.now() - startTime < maxWait) {
-          const content = await page.content();
-          if (
-            content.includes("TRANSCRIPT GENERATED") ||
-            content.includes("View transcript")
-          ) {
-            transcriptReady = true;
-            break;
-          }
-          console.log("🕒 Transcript not ready yet, waiting 5s...");
-          await page.waitForTimeout(checkInterval);
-        }
-
-        if (!transcriptReady)
-          throw new Error("Timeout waiting for transcript generation");
-
-        // ✅ Click "View transcript"
-        const viewBtn = await page.waitForSelector("text=View transcript", {
-          timeout: 30000,
+        // ⏳ Wait for transcript only
+        const transcriptBtn = await page.waitForSelector("text=View transcript", {
+          timeout: 240000,
           state: "visible",
         });
-        if (viewBtn) {
-          await viewBtn.click();
-          console.log("📄 Clicked 'View transcript' button after generation completed");
+
+        if (transcriptBtn) {
+          await transcriptBtn.click();
+          console.log("📄 Clicked 'View transcript' after audio upload.");
         } else {
-          console.warn(
-            "⚠️ 'View transcript' button not found even after transcript ready"
-          );
+          throw new Error("Transcript button not found after audio upload.");
         }
 
-        // Skip next two steps since already handled
-        i += 2;
+        // Skip next 3 steps (upload, transcribe, voice note)
+        i += 3;
+        continue;
+      }
+
+      // 📄 Document View Flow
+      if (
+        text.toLowerCase().includes("wait until 'view document' button is visible") ||
+        text.toLowerCase().includes("click it") &&
+        steps[i - 1]?.text.toLowerCase().includes("generate document")
+      ) {
+        console.log("⏳ Waiting for document generation...");
+
+        const documentBtn = await page.waitForSelector("text=View document", {
+          timeout: 240000,
+          state: "visible",
+        });
+
+        if (documentBtn) {
+          await documentBtn.click();
+          console.log("📄 Clicked 'View document' after generation.");
+        } else {
+          throw new Error("Document button not found after generation.");
+        }
+
         continue;
       }
 
@@ -352,7 +351,10 @@ async function runSteps(stagehand, issue, browserRef) {
       console.error(`❌ Step failed: "${text}"`);
       console.error("   ↳ Error:", err.message);
 
-      if (err.message.includes("Target page") || err.message.includes("cdpSession.send")) {
+      if (
+        err.message.includes("Target page") ||
+        err.message.includes("cdpSession.send")
+      ) {
         console.log("🔁 Browser/page closed — restarting session...");
         const newContext = await browserRef.newContext();
         const newPage = await newContext.newPage();
@@ -379,6 +381,7 @@ async function runSteps(stagehand, issue, browserRef) {
   await reportStatus(stagehand, { status: "passed", scenario: issue.identifier });
   return { identifier: issue.identifier, title: issue.title, status: "passed" };
 }
+
 
 // ---------------------- 🧵 Run Session Chunk ----------------------
 async function runSessionChunk(issues, sessionId) {
