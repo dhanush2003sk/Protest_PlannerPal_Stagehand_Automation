@@ -215,7 +215,7 @@ async function uploadAudio(stagehand) {
         if (el) el.style.display = "block";
       });
     }
-
+    
     // If still not visible, try clicking “Browse files” to trigger it
     if (isHidden) {
       const browseButton = await page.$("text=Browse files");
@@ -238,6 +238,8 @@ async function uploadAudio(stagehand) {
 }
 
 // ---------------------- 🧪 Run Steps (Modified Flow) ----------------------
+// ... your entire existing code remains the same up to runSteps() ...
+
 async function runSteps(stagehand, issue, browserRef) {
   console.log(`🚦 Running scenario: ${issue.title} (${issue.identifier})`);
 
@@ -270,7 +272,7 @@ async function runSteps(stagehand, issue, browserRef) {
         path: `screenshots/${issue.identifier}-step-${i + 1}.png`,
       });
 
-      // 🎧 Audio Upload Flow
+      // 🎧 Audio Upload Flow (existing logic remains unchanged)
       if (
         text.toLowerCase().includes("upload audio") ||
         text.toLowerCase().includes("attach recording")
@@ -279,7 +281,6 @@ async function runSteps(stagehand, issue, browserRef) {
         await uploadAudio(stagehand);
         console.log("✅ Audio upload completed");
 
-        // 🟨 Execute next 2 steps (transcribe + voice note)
         for (let j = 1; j <= 2; j++) {
           if (steps[i + j]) {
             const nextStep = steps[i + j].text;
@@ -289,7 +290,6 @@ async function runSteps(stagehand, issue, browserRef) {
           }
         }
 
-        // ⏳ Wait for transcript only
         const transcriptBtn = await page.waitForSelector("text=View transcript", {
           timeout: 240000,
           state: "visible",
@@ -302,16 +302,15 @@ async function runSteps(stagehand, issue, browserRef) {
           throw new Error("Transcript button not found after audio upload.");
         }
 
-        // Skip next 3 steps (upload, transcribe, voice note)
         i += 3;
         continue;
       }
 
-      // 📄 Document View Flow
+      // 📄 Document View Flow (existing logic remains unchanged)
       if (
         text.toLowerCase().includes("wait until 'view document' button is visible") ||
-        text.toLowerCase().includes("click it") &&
-        steps[i - 1]?.text.toLowerCase().includes("generate document")
+        (text.toLowerCase().includes("click it") &&
+          steps[i - 1]?.text.toLowerCase().includes("generate document"))
       ) {
         console.log("⏳ Waiting for document generation...");
 
@@ -330,6 +329,31 @@ async function runSteps(stagehand, issue, browserRef) {
         continue;
       }
 
+      // 🆕 ✅ OTP Typing Flow — ADDED HERE
+      if (text.toLowerCase().includes("enter the otp")) {
+        console.log("🔢 Detected OTP entry step...");
+        const otpMatch = text.match(/["']?(\d{6})["']?/);
+        if (!otpMatch) throw new Error("No 6-digit OTP found in step text");
+
+        const otp = otpMatch[1];
+        console.log(`📨 Typing OTP: ${otp}`);
+
+        // Select all visible OTP input boxes
+        const otpInputs = await page.locator('input[type="numeric"]');
+        const count = await otpInputs.count();
+
+        if (count < 6) throw new Error(`Found only ${count} OTP input boxes`);
+
+        // Type each digit into the respective box
+        for (let k = 0; k < otp.length; k++) {
+          await otpInputs.nth(k).fill(otp[k]);
+          await page.waitForTimeout(200);
+        }
+
+        console.log("✅ OTP entered successfully.");
+        continue;
+      }
+
       // 🟦 Idle or special step
       if (text.includes("#soloadviser")) {
         console.log("🕒 Staying idle on homepage for #soloadviser...");
@@ -338,7 +362,7 @@ async function runSteps(stagehand, issue, browserRef) {
         continue;
       }
 
-      // 🔹 Normal Stagehand action
+      // 🔹 Normal Stagehand action (unchanged)
       await Promise.race([
         page.act(text),
         new Promise((_, reject) =>
@@ -382,7 +406,6 @@ async function runSteps(stagehand, issue, browserRef) {
   return { identifier: issue.identifier, title: issue.title, status: "passed" };
 }
 
-
 // ---------------------- 🧵 Run Session Chunk ----------------------
 async function runSessionChunk(issues, sessionId) {
   console.log(`🧵 [${sessionId}] Starting session with ${issues.length} issues`);
@@ -412,7 +435,7 @@ async function runSessionChunk(issues, sessionId) {
       const result = await runSteps(stagehand, issue, browser);
       results.push(result);
 
-      if (["PLA-2705", "PLA-2536"].includes(issue.identifier)) {
+      if (["PLA-2705", "PLA-2536", "PLA-2874"].includes(issue.identifier)) {
         console.log(`\n🔁 [${sessionId}] Re-logging after ${issue.identifier}...`);
         try {
           await login(stagehand, { force: true });
