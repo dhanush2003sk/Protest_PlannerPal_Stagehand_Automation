@@ -3,7 +3,9 @@ import { Stagehand } from "@browserbasehq/stagehand";
 
 async function main() {
   const stagehand = new Stagehand({
-    env: "BROWSERBASE"
+    env: "BROWSERBASE",
+    modelName: "openai/gpt-4.1-mini",
+    modelClientOptions: { apiKey: process.env.OPENAI_API_KEY }
   });
 
   await stagehand.init();

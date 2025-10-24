@@ -134,7 +134,7 @@ async function runSteps(stagehand, steps) {
  
   const stagehand = new Stagehand({
     env: "BROWSERBASE",
-    modelName: "gpt-4o",
+    modelName: "openai/gpt-4.1-mini",
     modelClientOptions: { apiKey: OPENAI_API_KEY },
   });
   await stagehand.init({ context });
