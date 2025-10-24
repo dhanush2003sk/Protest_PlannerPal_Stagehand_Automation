@@ -130,19 +130,16 @@ function parseSteps(description) {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Start collecting when we hit a Stagehand-tagged block
     if (/^Acceptance Criteria\s*\(#Stagehand\)/i.test(trimmed)) {
       collecting = true;
       continue;
     }
 
-    // Stop collecting if we hit another Acceptance Criteria block
     if (/^Acceptance Criteria(?!\s*\(#Stagehand\))/i.test(trimmed)) {
       collecting = false;
       continue;
     }
 
-    // If we're inside a Stagehand block, extract valid steps
     if (collecting && bulletRegex.test(trimmed)) {
       const cleaned = trimmed.replace(bulletRegex, "").trim();
       steps.push({ text: cleaned });
@@ -186,7 +183,6 @@ async function uploadAudio(stagehand) {
   console.log("🎧 Starting audio upload...");
 
   try {
-    // Download and save the audio file locally
     const res = await fetch(AUDIO_URL);
     if (!res.ok) throw new Error(`Failed to fetch audio. Status: ${res.status}`);
 
@@ -195,14 +191,12 @@ async function uploadAudio(stagehand) {
     fs.writeFileSync(localPath, Buffer.from(buffer));
     console.log("⬇️ Audio file saved locally");
 
-    // Wait for any file input (even if hidden)
     let uploadInput = await page.$('input[type="file"]');
 
     if (!uploadInput) {
       throw new Error("File input not found on page.");
     }
 
-    // Check if input is hidden, try to make it visible if needed
     const isHidden = await uploadInput.evaluate((el) => {
       const style = window.getComputedStyle(el);
       return style.display === "none" || style.visibility === "hidden";
@@ -215,8 +209,7 @@ async function uploadAudio(stagehand) {
         if (el) el.style.display = "block";
       });
     }
-    
-    // If still not visible, try clicking “Browse files” to trigger it
+
     if (isHidden) {
       const browseButton = await page.$("text=Browse files");
       if (browseButton) {
@@ -226,20 +219,17 @@ async function uploadAudio(stagehand) {
       }
     }
 
-    // Finally set the file
     uploadInput = await page.$('input[type="file"]');
     await uploadInput.setInputFiles(localPath);
     console.log("📤 Audio file uploaded successfully.");
   } catch (err) {
     console.error("❌ uploadAudio error:", err.message);
-    await page.screenshot({ path: "FAILED_uploadAudio.png", fullPage: true });
+    await stagehand.page.screenshot({ path: "FAILED_uploadAudio.png", fullPage: true });
     throw err;
   }
 }
 
 // ---------------------- 🧪 Run Steps (Modified Flow) ----------------------
-// ... your entire existing code remains the same up to runSteps() ...
-
 async function runSteps(stagehand, issue, browserRef) {
   console.log(`🚦 Running scenario: ${issue.title} (${issue.identifier})`);
 
@@ -272,7 +262,6 @@ async function runSteps(stagehand, issue, browserRef) {
         path: `screenshots/${issue.identifier}-step-${i + 1}.png`,
       });
 
-      // 🎧 Audio Upload Flow (existing logic remains unchanged)
       if (
         text.toLowerCase().includes("upload audio") ||
         text.toLowerCase().includes("attach recording")
@@ -302,11 +291,35 @@ async function runSteps(stagehand, issue, browserRef) {
           throw new Error("Transcript button not found after audio upload.");
         }
 
+        // 🎵 Added: Play and pause the audio element directly
+        try {
+          console.log("▶️ Attempting to play and pause audio...");
+          await page.waitForTimeout(2000);
+
+          // Play
+          await page.evaluate(() => {
+            const audio = document.querySelector("audio");
+            if (!audio) throw new Error("Audio element not found");
+            audio.play();
+          });
+          console.log("🎶 Audio playback started.");
+          await page.waitForTimeout(5000); // play for 5 seconds
+
+          // Pause
+          await page.evaluate(() => {
+            const audio = document.querySelector("audio");
+            if (!audio) throw new Error("Audio element not found");
+            audio.pause();
+          });
+          console.log("⏸️ Audio playback paused successfully.");
+        } catch (err) {
+          console.warn("⚠️ Audio play/pause failed:", err.message);
+        }
+
         i += 3;
         continue;
       }
 
-      // 📄 Document View Flow (existing logic remains unchanged)
       if (
         text.toLowerCase().includes("wait until 'view document' button is visible") ||
         (text.toLowerCase().includes("click it") &&
@@ -329,7 +342,6 @@ async function runSteps(stagehand, issue, browserRef) {
         continue;
       }
 
-      // 🆕 ✅ OTP Typing Flow — ADDED HERE
       if (text.toLowerCase().includes("enter the otp")) {
         console.log("🔢 Detected OTP entry step...");
         const otpMatch = text.match(/["']?(\d{6})["']?/);
@@ -338,13 +350,11 @@ async function runSteps(stagehand, issue, browserRef) {
         const otp = otpMatch[1];
         console.log(`📨 Typing OTP: ${otp}`);
 
-        // Select all visible OTP input boxes
         const otpInputs = await page.locator('input[type="numeric"]');
         const count = await otpInputs.count();
 
         if (count < 6) throw new Error(`Found only ${count} OTP input boxes`);
 
-        // Type each digit into the respective box
         for (let k = 0; k < otp.length; k++) {
           await otpInputs.nth(k).fill(otp[k]);
           await page.waitForTimeout(200);
@@ -354,7 +364,6 @@ async function runSteps(stagehand, issue, browserRef) {
         continue;
       }
 
-      // 🟦 Idle or special step
       if (text.includes("#soloadviser")) {
         console.log("🕒 Staying idle on homepage for #soloadviser...");
         await new Promise((res) => setTimeout(res, 4000));
@@ -362,7 +371,6 @@ async function runSteps(stagehand, issue, browserRef) {
         continue;
       }
 
-      // 🔹 Normal Stagehand action (unchanged)
       await Promise.race([
         page.act(text),
         new Promise((_, reject) =>
@@ -477,17 +485,33 @@ async function runSessionChunk(issues, sessionId) {
     return;
   }
 
+  const midpoint = Math.ceil(projectIssues.length / 2);
+  const projectIssuesPart1 = projectIssues.slice(0, midpoint);
+  const projectIssuesPart2 = projectIssues.slice(midpoint);
+
+  console.log(`
+  🧩 Total Regression Pack issues: ${projectIssues.length}
+  ➤ Session 2: ${projectIssuesPart1.length} issues
+  ➤ Session 3: ${projectIssuesPart2.length} issues
+  `);
+
   const session1 = runSessionChunk(labeledIssues, "session-labeled");
 
   const session2 = new Promise((resolve) => {
     setTimeout(() => {
-      resolve(runSessionChunk(projectIssues, "session-project"));
-    }, 30000);
+      resolve(runSessionChunk(projectIssuesPart1, "session-project-part1"));
+    }, 40000);
   });
 
-  const results = await Promise.all([session1, session2]);
+  const session3 = new Promise((resolve) => {
+    setTimeout(() => {
+      resolve(runSessionChunk(projectIssuesPart2, "session-project-part2"));
+    }, 70000);
+  });
 
-  console.log("\n========= Summary =========");
+  const results = await Promise.all([session1, session2, session3]);
+
+  console.log("\n========= 🧾 Summary =========");
   console.table(
     results.flat().map((r) => ({
       Identifier: r.identifier,
