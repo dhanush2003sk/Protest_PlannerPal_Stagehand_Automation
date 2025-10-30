@@ -403,7 +403,7 @@ async function runSessionChunk(issues, sessionId) {
  
   const stagehand = new Stagehand({
   env: "BROWSERBASE",
-  modelName: "gpt-4o",
+  modelName: "openai/gpt-4.1-mini",
   modelClientOptions: { apiKey: OPENAI_API_KEY },
   browserbaseOptions: {
     recording: true,   // ✅ Enables Browserbase recording
