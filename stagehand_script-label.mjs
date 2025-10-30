@@ -465,14 +465,18 @@ async function runSessionChunk(issues, sessionId) {
     return;
   }
  
-  const midpoint = Math.ceil(projectIssues.length / 2);
-  const projectIssuesPart1 = projectIssues.slice(0, midpoint);
-  const projectIssuesPart2 = projectIssues.slice(midpoint);
+  const quarter = Math.ceil(projectIssues.length / 4);
+  const projectIssuesPart1 = projectIssues.slice(0, quarter);
+  const projectIssuesPart2 = projectIssues.slice(quarter, quarter * 2);
+  const projectIssuesPart3 = projectIssues.slice(quarter * 2, quarter * 3);
+  const projectIssuesPart4 = projectIssues.slice(quarter * 3);
  
   console.log(`
   🧩 Total Regression Pack issues: ${projectIssues.length}
   ➤ Session 2: ${projectIssuesPart1.length} issues
   ➤ Session 3: ${projectIssuesPart2.length} issues
+  ➤ Session 4: ${projectIssuesPart3.length} issues
+  ➤ Session 5: ${projectIssuesPart4.length} issues
   `);
  
   const session1 = runSessionChunk(labeledIssues, "session-labeled");
@@ -488,8 +492,20 @@ async function runSessionChunk(issues, sessionId) {
       resolve(runSessionChunk(projectIssuesPart2, "session-project-part2"));
     }, 70000);
   });
+
+  const session4 = new Promise((resolve) => {
+    setTimeout(() => {
+      resolve(runSessionChunk(projectIssuesPart3, "session-project-part3"));
+    }, 100000);
+  });
+
+  const session5 = new Promise((resolve) => {
+    setTimeout(() => {
+      resolve(runSessionChunk(projectIssuesPart4, "session-project-part4"));
+    }, 130000);
+  });
  
-  const results = await Promise.all([session1, session2, session3]);
+  const results = await Promise.all([session1, session2, session3, session4, session5]);
  
     console.log("\n========= 🧾 Summary =========");
  
