@@ -4,6 +4,7 @@ import { chromium } from "playwright";
 import fetch from "node-fetch";
 import fs from "fs";
 import dotenv from "dotenv";
+import crypto from "crypto";
 dotenv.config();
  
 const {
@@ -16,41 +17,49 @@ const {
 } = process.env;
  
 // ---------------------- 🎧 Audio URL ----------------------
-const AUDIO_URL =
-  "https://raw.githubusercontent.com/dhanush2003sk/Protest_PlannerPal_Stagehand_Automation/main/audio.mp3";
+const AUDIO_URL ="https://raw.githubusercontent.com/dhanush2003sk/Protest_PlannerPal_Stagehand_Automation/main/audio.mp3";
  
 // ---------------------- 🔐 Login ----------------------
+// ---------- 🧩 Safe Action Helper (stabilizes gpt-4.1-mini actions) ----------
+async function safeAct(page, instruction, waitTime = 1500) {
+  console.log(`🧭 Acting: ${instruction}`);
+  await page.act(instruction);
+  await page.waitForTimeout(waitTime); // short pause for UI to catch up
+}
+
 async function login(stagehand, { force = false } = {}) {
   const page = stagehand.page;
   console.log(force ? "🔁 Re-logging..." : "🔐 Logging in...");
- 
+
   try {
     const context = page.context();
     await context.clearCookies();
- 
+
     await page.goto(APP_BASE_URL, { waitUntil: "load", timeout: 45000 });
     await page.waitForLoadState("domcontentloaded");
- 
+
     await page.evaluate(() => {
       localStorage.clear();
       sessionStorage.clear();
     });
- 
-    await page.act("Click the 'Sign In' button");
-    await page.act(`Enter "${USER_NAME}" into the email field`);
-    await page.act("Click the 'Next' button");
-    await page.act(`Enter "${PASSWORD}" into the password field`);
-    await page.act("Click the 'Submit' button");
- 
+
+    // ✅ use safeAct instead of direct page.act
+    await safeAct(page, "Click the 'Sign In' button");
+    await safeAct(page, `Enter "${USER_NAME}" into the email field`);
+    await safeAct(page, "Click the 'Sign in' button");
+    await safeAct(page, `Enter "${PASSWORD}" into the password field`);
+    await safeAct(page, "Click the 'Sign In' button");
+
     if (TOTP_SECRET) {
       const token = authenticator.generate(TOTP_SECRET);
       console.log("🔐 TOTP Code:", token);
-      await page.act(
+      await safeAct(
+        page,
         `Enter the code ${token} into the two-factor authentication field`
       );
-      await page.act("Click the 'Submit' button to complete login");
+      await safeAct(page, "Click the 'Sign in' button to complete login");
     }
- 
+
     await page.waitForTimeout(4000);
     console.log("✅ Logged in successfully.");
   } catch (err) {
@@ -59,6 +68,7 @@ async function login(stagehand, { force = false } = {}) {
     await login(stagehand, { force: true });
   }
 }
+
  
 // ---------------------- 📥 Fetch Issues ----------------------
 async function getLabeledIssues() {
@@ -116,7 +126,7 @@ async function getProjectIssues(projectName) {
   const data = await res.json();
   return data?.data?.issues?.nodes || [];
 }
- 
+
 // ---------------------- 🧠 Parse Gherkin Steps ----------------------
 function parseSteps(description) {
   console.log("🔍 Parsing issue description...");
@@ -229,7 +239,7 @@ async function uploadAudio(stagehand) {
   }
 }
  
-// ---------------------- 🧪 Run Steps (Modified Flow) ----------------------
+// ---------------------- 🧪 Run Steps ----------------------
 async function runSteps(stagehand, issue, browserRef) {
   console.log(`🚦 Running scenario: ${issue.title} (${issue.identifier})`);
  
@@ -388,6 +398,56 @@ async function runSteps(stagehand, issue, browserRef) {
   await reportStatus(stagehand, { status: "passed", scenario: issue.identifier });
   return { identifier: issue.identifier, title: issue.title, status: "passed" };
 }
+
+
+// ---------- 🧠 GPT Cache System ----------
+const CACHE_FILE = "./gpt_cache.json";
+let cache = {};
+if (fs.existsSync(CACHE_FILE)) {
+  try {
+    cache = JSON.parse(fs.readFileSync(CACHE_FILE));
+  } catch {
+    cache = {};
+  }
+}
+
+function makeKey(prompt, model = "gpt-4.1-mini") {
+  return crypto.createHash("sha256").update(model + "::" + prompt).digest("hex");
+}
+
+async function cachedFetch(url, options) {
+  try {
+    const body = JSON.parse(options.body);
+    const messages = body.messages || [];
+    const prompt = messages.map(m => m.content).join("\n");
+    const key = makeKey(prompt, body.model);
+
+    // ✅ cache hit
+    if (cache[key]) {
+      console.log("⚡ GPT Cache hit");
+      return new Response(JSON.stringify(cache[key]), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // 🚀 cache miss – call real API
+    const res = await fetch(url, options);
+    const data = await res.json();
+
+    // 🪣 store in cache
+    cache[key] = data;
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
+    console.log("💾 Cached new GPT response");
+
+    return new Response(JSON.stringify(data), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.warn("⚠️ Cache wrapper error:", err.message);
+    return fetch(url, options); // fallback
+  }
+}
+
  
 // ---------------------- 🧵 Run Session Chunk ----------------------
 async function runSessionChunk(issues, sessionId) {
@@ -404,13 +464,15 @@ async function runSessionChunk(issues, sessionId) {
   const stagehand = new Stagehand({
   env: "BROWSERBASE",
   modelName: "openai/gpt-4.1-mini",
-  modelClientOptions: { apiKey: OPENAI_API_KEY },
+  modelClientOptions: {apiKey: OPENAI_API_KEY,
+    fetch: cachedFetch, // 🧠 attach the cache layer here
+  },
   browserbaseOptions: {
-    recording: true,   // ✅ Enables Browserbase recording
-    storeLogs: true,   // optional – keeps logs
+    recording: true,
+    storeLogs: true,
   },
 });
- 
+
  
   await stagehand.init({ context, page });
   await login(stagehand);
@@ -490,19 +552,19 @@ async function runSessionChunk(issues, sessionId) {
   const session3 = new Promise((resolve) => {
     setTimeout(() => {
       resolve(runSessionChunk(projectIssuesPart2, "session-project-part2"));
-    }, 70000);
+    }, 80000);
   });
 
   const session4 = new Promise((resolve) => {
     setTimeout(() => {
       resolve(runSessionChunk(projectIssuesPart3, "session-project-part3"));
-    }, 100000);
+    }, 120000);
   });
 
   const session5 = new Promise((resolve) => {
     setTimeout(() => {
       resolve(runSessionChunk(projectIssuesPart4, "session-project-part4"));
-    }, 130000);
+    }, 160000);
   });
  
   const results = await Promise.all([session1, session2, session3, session4, session5]);
