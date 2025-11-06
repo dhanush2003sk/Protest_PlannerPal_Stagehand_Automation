@@ -14,11 +14,15 @@ const {
   USER_NAME,
   PASSWORD,
   TOTP_SECRET,
+  IRESS_USER_ID,
+  IRESS_PASSWORD,
 } = process.env;
  
 // ---------------------- 🎧 Audio URL ----------------------
 const AUDIO_URL ="https://raw.githubusercontent.com/dhanush2003sk/Protest_PlannerPal_Stagehand_Automation/main/audio.mp3";
- 
+
+//---------------------------Templates------------------------------
+const FOLLOW_UP_URL ="https://github.com/AdviserCoPilot/e2e-test-suite/blob/feat/my-new-feature/Follow-up%20Email%20Draft.docx" 
 // ---------------------- 🔐 Login ----------------------
 // ---------- 🧩 Safe Action Helper (stabilizes gpt-4.1-mini actions) ----------
 async function safeAct(page, instruction, waitTime = 1500) {
@@ -238,6 +242,7 @@ async function uploadAudio(stagehand) {
     throw err;
   }
 }
+
  
 // ---------------------- 🧪 Run Steps ----------------------
 async function runSteps(stagehand, issue, browserRef) {
@@ -267,7 +272,49 @@ async function runSteps(stagehand, issue, browserRef) {
  
     try {
       if (page.isClosed()) throw new Error("Target page is already closed");
- 
+
+            // ---------------------- 🔄 Sync with IRESS Handling ----------------------
+      if (text.toLowerCase().includes("sync with iress")) {
+        console.log("🔄 Detected 'Sync with IRESS' step — executing login flow...");
+
+        try {
+          // Step 1: Click Sync with IRESS button
+          await safeAct(page, "Click the 'Sync with IRESS' button");
+
+          // Step 2: Type credentials
+          await safeAct(page, `Enter "${IRESS_USER_ID}" into the username field`);
+          await safeAct(page, `Enter "${IRESS_PASSWORD}" into the password field`);
+          await safeAct(page, "Click the 'Login' or 'Sign in' button");
+
+          // Step 3: Wait briefly for possible re-login page
+          console.log("🕵️ Checking for duplicated login prompt...");
+          await page.waitForTimeout(4000);
+
+          // 🔍 Natural-English detection instead of selectors
+          const reloginDetected = await page.observe(
+            "Check if the app is showing a login form again with fields for username or password"
+          );
+
+          if (reloginDetected) {
+            console.log("🔁 Re-login detected — typing password again...");
+            await safeAct(page, `Enter "${IRESS_PASSWORD}" into the password field`);
+            await safeAct(page, "Click the 'Login' or 'Sign in' button");
+          } else {
+            console.log("✅ No re-login required, continuing...");
+          }
+
+          // Step 5: Confirm successful login
+          await page.observe("Check if the IRESS homepage or dashboard is visible");
+          console.log("✅ Sync with IRESS flow completed successfully.");
+          continue;
+
+        } catch (err) {
+          console.error("❌ Sync with IRESS flow failed:", err.message);
+          await page.screenshot({ path: "FAILED_SyncWithIRESS.png", fullPage: true });
+          throw err;
+        }
+      }
+
       await page.screenshot({
         path: `screenshots/${issue.identifier}-step-${i + 1}.png`,
       });
